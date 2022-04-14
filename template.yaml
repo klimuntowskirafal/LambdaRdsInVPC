@@ -1,0 +1,178 @@
+Parameters:
+  DBInstanceID:
+    Default: myDBInstance
+    Description: My database instance
+    Type: String
+    MinLength: 1
+    MaxLength: 63
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+  DBName:
+    Default: myDB
+    Description: My database
+    Type: String
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+  DBInstanceClass:
+    Default: db.t2.micro
+    Description: DB instance class
+    Type: String
+    ConstraintDescription: Must select a valid DB instance type.
+  DBStorageType:
+    Default: gp2
+    Description: DB storage type
+    Type: String
+    AllowedValues:
+      - gp2
+      - io1
+      - standard
+  DBAllocatedStorage:
+    Default: 20
+    Description: The size of the database (GiB)
+    Type: Number
+    MinValue: 20
+    MaxValue: 30
+    ConstraintDescription: must be between 20 and 65536 GiB.
+  DBUsername:
+    NoEcho: true
+    Description: Username for MySQL database access
+    Type: String
+    MinLength: 1
+    MaxLength: 16
+  DBPassword:
+    NoEcho: true
+    Description: Password MySQL database access
+    Type: String
+    MinLength: 8
+    MaxLength: 41
+
+Resources:
+  myVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      InstanceTenancy: default
+      Tags:
+        - Key: name
+          Value: demoVPC
+
+  MyVpcSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG for DB
+      GroupName: MyDBVpcSecurityGroup
+      VpcId: !Ref myVPC
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  MyPrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref myVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: eu-central-1a
+
+  MyPrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref myVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: eu-central-1b
+
+  MyDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets gropu
+      SubnetIds:
+        - !Ref MyPrivateSubnetA
+        - !Ref MyPrivateSubnetB
+      Tags:
+        - Key: name
+          Value: demoVPC
+
+  MyDB:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBInstanceIdentifier: !Ref DBInstanceID
+      DBName: !Ref DBName
+      DBInstanceClass: !Ref DBInstanceClass
+      StorageType: !Ref DBStorageType
+      AllocatedStorage: !Ref DBAllocatedStorage
+      Engine: mysql
+      EngineVersion: 8.0.28
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      VPCSecurityGroups:
+        - !Ref MyVpcSecurityGroup
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      AvailabilityZone: eu-central-1a
+
+  MyLambdaAccessingRDS:
+    DependsOn: MyDB
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Create ExampleDB table in RDS, add few records and printout
+      FunctionName: LambdaAccessRds
+      Handler: app.handler
+      MemorySize: 128
+      Role: arn:aws:iam::025628008566:role/LambdaVPCAccessToRds
+      Runtime: python3.8
+      Environment:
+        Variables:
+          RDS_HOST: !GetAtt MyDB.Endpoint.Address
+      Code:
+        ZipFile: |
+          import sys
+          import logging
+          import pymysql
+          import os
+          rds_host = os.environ['RDS_HOST']
+          name = 'admin'
+          password = 'Password123'
+          db_name = 'myDB'
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          try:
+              conn = pymysql.connect(host=rds_host, user=name, passwd=password, db=db_name, connect_timeout=5)
+          except pymysql.MySQLError as e:
+              logger.error("ERROR: Unexpected error: Could not connect to MySQL instance.")
+              logger.error(e)
+              sys.exit()
+          
+          logger.info("SUCCESS: Connection to RDS MySQL instance succeeded")
+          def handler(event, context):
+              """
+              This function fetches content from MySQL RDS instance
+              """
+          
+              item_count = 0
+          
+              with conn.cursor() as cur:
+                  cur.execute("create table Employee ( EmpID  int NOT NULL, Name varchar(255) NOT NULL, PRIMARY KEY (EmpID))")
+                  cur.execute('insert into Employee (EmpID, Name) values(1, "Joe")')
+                  cur.execute('insert into Employee (EmpID, Name) values(2, "Bob")')
+                  cur.execute('insert into Employee (EmpID, Name) values(3, "Mary")')
+                  conn.commit()
+                  cur.execute("select * from Employee")
+                  for row in cur:
+                      item_count += 1
+                      logger.info(row)
+                      #print(row)
+              conn.commit()
+          
+              return "Added %d items from RDS MySQL table" %(item_count)
+
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref MyVpcSecurityGroup
+        SubnetIds:
+          - !Ref MyPrivateSubnetA
+          - !Ref MyPrivateSubnetB
+
