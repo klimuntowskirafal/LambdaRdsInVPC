@@ -1,4 +1,9 @@
 Parameters:
+  MyLambdaVPCAccessExecutionRole:
+    Description: ARN of the role
+    Default: arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+    Type: String
+    ConstraintDescription: Use default value or provide other lambda execution policy role
   DBInstanceID:
     Default: myDBInstance
     Description: My database instance
@@ -48,6 +53,22 @@ Parameters:
     MaxLength: 41
 
 Resources:
+  MyLambdaAccessRdsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Allow Lambda to access AWS resources
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref MyLambdaVPCAccessExecutionRole
+
   myVPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -113,28 +134,35 @@ Resources:
       AvailabilityZone: eu-central-1a
 
   MyLambdaAccessingRDS:
-    DependsOn: MyDB
+    DependsOn:
+      - MyDB
+      - MyLambdaAccessRdsRole
     Type: AWS::Lambda::Function
     Properties:
       Description: Create ExampleDB table in RDS, add few records and printout
       FunctionName: LambdaAccessRds
-      Handler: app.handler
+      Handler: index.handler
       MemorySize: 128
-      Role: arn:aws:iam::025628008566:role/LambdaVPCAccessToRds
+      Role: !GetAtt MyLambdaAccessRdsRole.Arn
       Runtime: python3.8
       Environment:
         Variables:
           RDS_HOST: !GetAtt MyDB.Endpoint.Address
+          MYSQL_USERNAME: !Ref DBUsername
+          MYSQL_PASSWORD: !Ref DBPassword
+          DBName: !Ref DBName
       Code:
         ZipFile: |
           import sys
           import logging
           import pymysql
           import os
+          
+          
           rds_host = os.environ['RDS_HOST']
-          name = 'admin'
-          password = 'Password123'
-          db_name = 'myDB'
+          name = os.environ['MYSQL_USERNAME']
+          password = os.environ['MYSQL_PASSWORD']
+          db_name = os.environ['DBName']
           
           logger = logging.getLogger()
           logger.setLevel(logging.INFO)
