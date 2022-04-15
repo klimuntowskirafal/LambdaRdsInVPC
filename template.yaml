@@ -133,10 +133,23 @@ Resources:
       DBSubnetGroupName: !Ref MyDBSubnetGroup
       AvailabilityZone: eu-central-1a
 
+  PyMsqlLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      CompatibleRuntimes:
+        - python3.8
+      Content:
+        #change bucket name with your created bucket
+        S3Bucket: cf-templates-15ynh9svu8qip-eu-central-1
+        S3Key: pymysql.zip
+      Description: pymysql lib stored in s3 bucket
+      LayerName: pymysql-lib
+
   MyLambdaAccessingRDS:
     DependsOn:
       - MyDB
       - MyLambdaAccessRdsRole
+      - PyMsqlLayer
     Type: AWS::Lambda::Function
     Properties:
       Description: Create ExampleDB table in RDS, add few records and printout
@@ -151,6 +164,7 @@ Resources:
           MYSQL_USERNAME: !Ref DBUsername
           MYSQL_PASSWORD: !Ref DBPassword
           DBName: !Ref DBName
+      Layer: !Ref PyMsqlLayer
       Code:
         ZipFile: |
           import sys
