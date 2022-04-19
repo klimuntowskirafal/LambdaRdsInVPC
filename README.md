@@ -1,3 +1,11 @@
 Write to RDS table with Lambda in a VPC
 
-push pymysql.zip file to your s3 bucket and change bucket name in template.yml
+1. push pymysql.zip file to your s3 bucket. You can create one through aws cli:
+```
+aws s3api create-bucket \
+    --bucket my-bucket-raf-test \
+    --region eu-central-1 \
+    --create-bucket-configuration LocationConstraint=eu-central-1
+```
+
+2. change bucket name in template.yml before deploying with cloud formation
